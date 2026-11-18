@@ -32,3 +32,18 @@ class Audit(Base):
     __tablename__='audit_logs'
     id=Column(Integer,primary_key=True);actor=Column(String(120),nullable=False);action=Column(String(160),nullable=False)
     created_at=Column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
+class ReviewSession(Base):
+    __tablename__='review_sessions'
+    id=Column(Integer,primary_key=True);code=Column(String(80),unique=True,nullable=False)
+    page_size=Column(Integer,nullable=False);total=Column(Integer,nullable=False,default=0)
+    last_position=Column(Integer,nullable=False,default=0);status=Column(String(20),default='active',nullable=False)
+    created_at=Column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
+    expires_at=Column(DateTime(timezone=True),nullable=False)
+class ReviewItem(Base):
+    __tablename__='review_items'
+    id=Column(Integer,primary_key=True);session_id=Column(Integer,ForeignKey('review_sessions.id',ondelete='CASCADE'),nullable=False)
+    position=Column(Integer,nullable=False)
+    transfer_id=Column(Integer,nullable=False);transfer_code=Column(String(80),nullable=False)
+    destination=Column(String(120),nullable=False);transfer_quantity=Column(Integer,nullable=False)
+    sample_code=Column(String(80),nullable=False);sample_quantity=Column(Integer,nullable=False)
+    __table_args__=(UniqueConstraint('session_id','position'),)

@@ -32,6 +32,9 @@ services:
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: ${JWT_SECRET:-local-lock-lab-change-before-public-use}
       SEED_DEMO: ${SEED_DEMO:-true}
+      REVIEW_TTL_SECONDS: ${REVIEW_TTL_SECONDS:-60}
+      REVIEW_SWEEP_SECONDS: ${REVIEW_SWEEP_SECONDS:-10}
+      ARTIFACT_DIR: ${ARTIFACT_DIR:-/artifacts}
     ports: ["${BACKEND_PORT:-19242}:8000"]
     volumes: [run-artifacts:/artifacts]
     depends_on:

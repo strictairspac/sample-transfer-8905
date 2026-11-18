@@ -5,12 +5,14 @@ from sqlalchemy import text
 from src.config.database import Base,engine
 from src.models import entities
 from src.controllers.auth import router as auth
-from src.routes import samples,transfers,trials,audit
+from src.routes import samples,transfers,trials,audit,reviews
 from src.middlewares.errors import ErrorMiddleware
 from src.middlewares.request_id import RequestIdMiddleware
 @asynccontextmanager
 async def lifespan(app):
     Base.metadata.create_all(engine)
+    from src.services.reviews import start_sweeper
+    start_sweeper()
     if os.getenv('SEED_DEMO','true')=='true':
         try:
             from scripts.seed_demo import seed
@@ -19,7 +21,7 @@ async def lifespan(app):
     yield
 app=FastAPI(title='实验样本流转并发台',lifespan=lifespan)
 app.add_middleware(ErrorMiddleware);app.add_middleware(RequestIdMiddleware)
-for r in (auth,samples.router,transfers.router,trials.router,audit.router): app.include_router(r)
+for r in (auth,samples.router,transfers.router,trials.router,audit.router,reviews.router): app.include_router(r)
 @app.get('/health')
 def health():
     with engine.connect() as c: c.execute(text('SELECT 1'))

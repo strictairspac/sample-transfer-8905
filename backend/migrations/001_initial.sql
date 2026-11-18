@@ -3,3 +3,6 @@
 -- Critical locking query (worker only):
 -- SELECT remaining FROM trial_balances WHERE trial_id = :id FOR UPDATE;
 -- SET LOCAL lock_timeout = '250ms';
+-- Cursor review paging (src/services/reviews.py):
+-- SELECT * FROM review_sessions WHERE id = :id FOR UPDATE;          -- serialize page advances
+-- SELECT * FROM review_sessions WHERE status='active' AND expires_at <= now() FOR UPDATE SKIP LOCKED; -- sweeper

@@ -8,6 +8,7 @@
 
 - 样本台账：批次、可用份数、保管位置，可录入。
 - 流转申请：关联样本、指定数量和接收实验室。
+- 复核查阅：同一时刻把申请与样本量留存为快照，游标翻页逐页核对；并发翻页不漏不重，到期拒绝旧页并释放留存。
 - 并发执行：Redis 队列、独立 Python worker、可设锁等待上限。
 - 冲突证据：Backend PID、SQLSTATE、回执回滚、数量守恒与 JSON 导出。
 - 管理员审计：登录、写入和执行动作。
@@ -40,20 +41,30 @@ docker compose exec -T backend python -m scripts.seed_demo
 
 单 worker 顺序运行任务，无生产重试/崩溃恢复调度；worker中断时 running 任务需要人工重建，不能用作生产样本库存扣减。
 
+## 复核查阅（快照 + 游标翻页）
+
+复核员需要在登记、改量持续发生的同时逐页核对申请与样本量。发起查阅时在**单条连接的单事务**里用一条 JOIN 同时读取 transfers 与 samples，连同 `review_sessions` 头行一并提交：申请和样本量取自同一时刻，期间的新登记、改量不进入已留存的页。留存行存 `review_items`（位序 position 唯一），翻页以 `last_position` 为游标用 `WHERE position > :cursor ORDER BY position LIMIT page_size` 推进。
+
+- 并发翻页：翻页事务先 `SELECT ... FOR UPDATE` 锁住会话头行并 `populate_existing` 重读已提交游标，8 个同游标请求恰好 1 个成功、其余 409，全量不重不漏。
+- 服务重启：快照、游标、到期时间全部在数据库里，重启后从 `next_cursor` 接着翻。
+- 闲置不占连接：引擎使用 NullPool，请求结束连接即归还；查阅留存期间无任何打开的事务或游标。
+- 到期与清理：到期后翻页返回 410 并删除留存行（懒过期 + 后台清理线程）；清理线程用 `FOR UPDATE SKIP LOCKED`，撞上锁中的翻页就跳过该会话，因此读者只会读到完整的一页或收到到期提示，不会读到半页。
+- 页面（复核查阅页）可发起新查阅、上一页/下一页翻页、显示倒计时与到期提示，到期后可直接开新查阅。
+
 ## 工程说明
 
 |服务|技术|职责|
 |---|---|---|
-|frontend|原生HTML/CSS/JS + Nginx|4业务页+登录，反向代理 /api/|
+|frontend|原生HTML/CSS/JS + Nginx|5业务页+登录，反向代理 /api/|
 |backend|Python3.11/FastAPI/SQLAlchemy/PyJWT|校验、权限、审计、持久化|
 |worker|Python3.11/psycopg|真实双连接锁竞争|
 |db|PostgreSQL16|业务数据、隔离镜像账本|
 |redis|Redis7|持久队列|
 
 目录：`frontend/src/{api,stores,types,components/common,hooks,pages,router,utils,constants}`；`backend/src/{routes,controllers,services,models,schemas,middlewares,utils,constants,config}`；`backend/scripts/seed_demo.py`；`backend/migrations/001_initial.sql`。
-核心实体 Sample、Transfer、Trial 各有模型、schema、服务、路由、API、store与页面；共享 table/badge/frame 组件。共享枚举 roles/run states 位于后端 `src/constants/enums.py`、模型/权限引用和前端 `src/constants/enums.js`、frame/badge；状态枚举 queued/running/completed/failed。两个后端中间件：request_id/errors。
+核心实体 Sample、Transfer、Trial、ReviewSession/ReviewItem 各有模型、schema、服务、路由、API、store与页面；共享 table/badge/frame 组件。共享枚举 roles/run states/review states 位于后端 `src/constants/enums.py`、模型/权限引用和前端 `src/constants/enums.js`、frame/badge；状态枚举 queued/running/completed/failed，查阅状态 active/expired/closed。两个后端中间件：request_id/errors。
 
-环境变量见 `.env.example`：COMPOSE_PROJECT_NAME、三端口、DB_PASSWORD、JWT_SECRET、SEED_DEMO。默认密码仅用于本地演示；JWT8小时有效。seed按自然键仅插入缺失行，不覆盖修改。所有5服务有健康检查，backend/worker依赖健康数据库/Redis，frontend依赖backend；db/redis/artifacts使用命名卷。停止及清空本项目数据：`docker compose down -v --remove-orphans`。
+环境变量见 `.env.example`：COMPOSE_PROJECT_NAME、三端口、DB_PASSWORD、JWT_SECRET、SEED_DEMO、REVIEW_TTL_SECONDS（查阅留存秒数，默认60）、REVIEW_SWEEP_SECONDS（清理周期，默认10）、ARTIFACT_DIR（证据JSON目录，默认/artifacts）。默认密码仅用于本地演示；JWT8小时有效。seed按自然键仅插入缺失行，不覆盖修改。所有5服务有健康检查，backend/worker依赖健康数据库/Redis，frontend依赖backend；db/redis/artifacts使用命名卷。停止及清空本项目数据：`docker compose down -v --remove-orphans`。
 
 本地开发：Python3.11安装 backend/requirements.txt；设置 DATABASE_URL/REDIS_URL 后 `uvicorn src.main:app --reload`（backend目录）；worker `python -m src.worker`；前端用Nginx同源代理后端。前端双字体经Google Fonts加载，离线使用浏览器字体回退；业务不依赖外部字体。
 
